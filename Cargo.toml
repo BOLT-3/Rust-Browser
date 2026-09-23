@@ -1,0 +1,32 @@
+[package]
+name = "cef_slint_browser"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+
+[dependencies]
+# VERIFIED against welding 0.14.1's own Cargo.toml (pulled from crates.io):
+# it pins cef = "151" (features = ["accelerated_osr"]) and wgpu_30 (a package
+# rename of the real `wgpu` crate) = "30.0.1". Do NOT add your own `cef` or
+# `wgpu` dependency with a different version — let welding's requirement
+# drive resolution, and use welding::wgpu / welding's re-exported cef types
+# instead of adding a second copy of either crate.
+welding = { version = "0.14.1", features = ["cef-runtime"] } # default features = ["wgpu-30"]
+
+# VERIFIED against slint 1.18.0's published Cargo.toml: unstable-wgpu-30
+# exists and requires `wgpu ^30`, which is satisfied by the same 30.0.1
+# welding resolves to. cargo tree -i wgpu should show exactly one version.
+slint = { version = "1.18.0", features = ["unstable-wgpu-30"] }
+
+# CefSurfaceConfig::initial_size / LinuxCefProducer::resize take
+# dpi::PhysicalSize<u32> (verified: welding depends on dpi = "0.1.2" and does
+# NOT re-export it), so we need our own copy of the same crate/version.
+dpi = "0.1.2"
+
+# wgpu's request_adapter/request_device are async; we're not otherwise async
+# here, so block on them synchronously in main().
+pollster = "0.3"
+env_logger = "0.11.11"
+
+[build-dependencies]
+slint-build = "1.18.0"

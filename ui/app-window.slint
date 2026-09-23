@@ -1,0 +1,50 @@
+export component AppWindow inherits Window {
+    title: "CEF + Slint Browser";
+    preferred-width: 1200px;
+    preferred-height: 760px;
+
+    // Set from Rust every time a new CEF frame is imported and blitted.
+    in-out property <image> browser-frame;
+
+    // Forwarded to Rust, then translated into welding::MouseEvent / KeyEvent
+    // and sent into CEF via CefSurfaceProducer.
+    callback mouse-moved(length, length);
+    callback mouse-pressed(length, length);
+    callback mouse-released(length, length);
+    callback mouse-wheel(length, length, length, length);
+    callback key-pressed(string, bool, bool, bool, bool);
+    callback key-released(string, bool, bool, bool, bool);
+
+    content-area := FocusScope {
+        key-pressed(event) => {
+            root.key-pressed(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.alt, event.modifiers.meta);
+            accept
+        }
+        key-released(event) => {
+            root.key-released(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.alt, event.modifiers.meta);
+            accept
+        }
+
+        TouchArea {
+            moved => { root.mouse-moved(self.mouse-x, self.mouse-y); }
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    content-area.focus();
+                    root.mouse-pressed(self.mouse-x, self.mouse-y);
+                } else if (event.kind == PointerEventKind.up) {
+                    root.mouse-released(self.mouse-x, self.mouse-y);
+                }
+            }
+            scroll-event(event) => {
+                root.mouse-wheel(self.mouse-x, self.mouse-y, event.delta-x, event.delta-y);
+                accept
+            }
+
+            Image {
+                source: root.browser-frame;
+                width: 100%;
+                height: 100%;
+            }
+        }
+    }
+}
