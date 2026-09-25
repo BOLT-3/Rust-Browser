@@ -7,7 +7,11 @@ use welding::{
     wgpu, CefRuntime, CefRuntimeConfig, CefSandboxMode, CefSurfaceConfig, CefSurfaceProducer,
     EventModifiers, HostWgpuContext, KeyEvent, KeyEventKind, MouseAction, MouseButton, MouseEvent,
 };
+#[cfg(target_os = "linux")]
 use welding::linux_cef::{LinuxCefConfig, LinuxCefProducer};
+
+#[cfg(target_os = "windows")]
+use welding::windows_cef::{WindowsCefConfig, WindowsCefProducer};
 
 slint::include_modules!();
 
@@ -59,7 +63,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // build_dmabuf_capable_device (not a plain adapter.request_device) is
     // what actually turns on the Vulkan external-memory / DRM-format-modifier
-    // extensions CEF's DMA-BUF frames need to import successfully.
+    // extensions CEF's DMA-BUF frames need to import successfully on Linux.
+    #[cfg(target_os = "linux")]
     let (device, queue) = welding::build_dmabuf_capable_device(
         &adapter,
         &wgpu::DeviceDescriptor {
@@ -71,6 +76,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
+    #[cfg(target_os = "windows")]
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("shared_device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            ..Default::default()
+        },
+        None,
+    ))?;
+
     // ── 4. Slint uses its default backend (OpenGL), bypassing wgpu presentation bugs ──
 
     // ── 5. Build the Slint window ─────────────────────────────────────────
@@ -79,9 +96,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Slint window created!");
 
     let win_size = app.window().size();
+    
+    #[cfg(target_os = "linux")]
     let producer = LinuxCefProducer::new(
         &runtime,
         LinuxCefConfig {
+            surface: CefSurfaceConfig {
+                initial_url: "https://google.com".into(),
+                initial_size: dpi::PhysicalSize::new(win_size.width.max(1), win_size.height.max(1)),
+                scale_factor: app.window().scale_factor(),
+                ..Default::default()
+            },
+        },
+    )?;
+
+    #[cfg(target_os = "windows")]
+    let producer = WindowsCefProducer::new(
+        &runtime,
+        WindowsCefConfig {
             surface: CefSurfaceConfig {
                 initial_url: "https://google.com".into(),
                 initial_size: dpi::PhysicalSize::new(win_size.width.max(1), win_size.height.max(1)),
