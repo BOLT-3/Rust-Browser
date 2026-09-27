@@ -17,6 +17,8 @@ pub struct BgraToRgbaBlitter {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    // Cached output texture — reused across frames when dimensions match
+    cached_output: Option<(u32, u32, wgpu::Texture)>,
 }
 
 impl BgraToRgbaBlitter {
@@ -92,33 +94,52 @@ impl BgraToRgbaBlitter {
             pipeline,
             bind_group_layout,
             sampler,
+            cached_output: None,
         }
     }
 
     /// Converts `src_view` (CEF's imported Bgra8UnormSrgb DMA-BUF texture)
-    /// into a fresh Rgba8Unorm texture that `slint::Image::try_from` accepts.
+    /// into an Rgba8Unorm texture that `slint::Image::try_from` accepts.
+    ///
+    /// The output texture is cached and reused when dimensions match,
+    /// avoiding a fresh GPU allocation on every frame.
+    ///
+    /// Returns a reference to the output texture and an already-encoded
+    /// command buffer. The caller should combine this with their own
+    /// copy_texture_to_buffer in a single queue.submit() call.
     pub fn convert(
-        &self,
+        &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         src_view: &wgpu::TextureView,
         width: u32,
         height: u32,
-    ) -> wgpu::Texture {
-        let output = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cef_frame_rgba"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+    ) -> (&wgpu::Texture, wgpu::CommandBuffer) {
+        // Reuse the cached texture if dimensions match, otherwise allocate
+        let needs_new = match &self.cached_output {
+            Some((w, h, _)) => *w != width || *h != height,
+            None => true,
+        };
+        if needs_new {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("cef_frame_rgba"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            self.cached_output = Some((width, height, tex));
+        }
+
+        let (_, _, output) = self.cached_output.as_ref().unwrap();
         let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -160,8 +181,7 @@ impl BgraToRgbaBlitter {
             pass.set_bind_group(0, &bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
-        queue.submit(Some(encoder.finish()));
 
-        output
+        (output, encoder.finish())
     }
 }

@@ -27,6 +27,7 @@ dpi = "0.1.2"
 # here, so block on them synchronously in main().
 pollster = "0.3"
 env_logger = "0.11.11"
+sysinfo = "0.38.4"
 
 [build-dependencies]
 slint-build = "1.18.0"
